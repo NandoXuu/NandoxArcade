@@ -24,11 +24,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,12 +56,14 @@ import com.nandox.arcade.BuildConfig
 import com.nandox.arcade.core.Platforms
 import com.nandox.arcade.data.ArcadeDb
 import com.nandox.arcade.emulator.PluginRegistry
+import com.nandox.arcade.emulator.PluginStore
 import com.nandox.arcade.emulator.PluginStatus
 
 @Composable
 fun ArcadeApp() {
     val nav = rememberNavController()
-    val registry = remember { PluginRegistry.builtin() }
+    val context = LocalContext.current
+    val registry = remember { PluginRegistry.load(context) }
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
         NavHost(nav, startDestination = "home") {
             composable("home") {
@@ -184,7 +188,8 @@ private fun LibraryScreen(platformId: String) {
 @Composable
 private fun PluginsScreen(registry: PluginRegistry) {
     val context = LocalContext.current
-    val diagnostics = remember { registry.diagnostics(context) }
+    val store = remember { PluginStore(context) }
+    var diagnostics by remember { mutableStateOf(registry.diagnostics(context, store)) }
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Text("Plugins de emulação", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text(
@@ -194,25 +199,44 @@ private fun PluginsScreen(registry: PluginRegistry) {
         Spacer(Modifier.height(16.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(diagnostics, key = { it.manifest.id }) { d ->
-                Column(
+                Row(
                     Modifier.fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
                         .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(d.manifest.name, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        d.manifest.platforms.mapNotNull { Platforms.byId(it)?.name }.joinToString(),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp,
-                    )
-                    val status = when (d.status) {
-                        PluginStatus.READY -> "App instalado"
-                        PluginStatus.APP_NOT_INSTALLED -> "App não instalado"
-                        PluginStatus.ABI_INCOMPATIBLE -> "ABI incompatível"
+                    Column(Modifier.weight(1f)) {
+                        Text(d.manifest.name, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            d.manifest.platforms.mapNotNull { Platforms.byId(it)?.name }.joinToString(),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 13.sp,
+                        )
+                        val status = when (d.status) {
+                            PluginStatus.READY -> "App instalado"
+                            PluginStatus.APP_NOT_INSTALLED -> "App não instalado"
+                            PluginStatus.ABI_INCOMPATIBLE -> "ABI incompatível"
+                            PluginStatus.RUNTIME_UNAVAILABLE -> "Runtime nativo indisponível"
+                            PluginStatus.DISABLED -> "Desativado"
+                        }
+                        val validation = if (d.manifest.validated) "validado" else "não validado"
+                        Text("$status · $validation", fontSize = 13.sp)
                     }
-                    val validation = if (d.manifest.validated) "validado" else "não validado"
-                    Text("$status · $validation", fontSize = 13.sp)
+                    Switch(
+                        checked = d.enabled,
+                        onCheckedChange = {
+                            store.setEnabled(d.manifest.id, it)
+                            diagnostics = registry.diagnostics(context, store)
+                        },
+                    )
                 }
+            }
+            items(registry.rejected, key = { it.first }) { (file, reason) ->
+                Text(
+                    "Manifesto rejeitado: $file ($reason)",
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 13.sp,
+                )
             }
         }
     }

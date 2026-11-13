@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import java.io.File
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -62,9 +63,9 @@ object PluginManifestParser {
     }
 }
 
-enum class PluginStatus { READY, APP_NOT_INSTALLED, ABI_INCOMPATIBLE }
+enum class PluginStatus { READY, APP_NOT_INSTALLED, ABI_INCOMPATIBLE, RUNTIME_UNAVAILABLE, DISABLED }
 
-data class PluginDiagnostic(val manifest: PluginManifest, val status: PluginStatus)
+data class PluginDiagnostic(val manifest: PluginManifest, val status: PluginStatus, val enabled: Boolean)
 
 interface EmulatorAdapter {
     val manifest: PluginManifest
@@ -93,27 +94,77 @@ class ExternalAppAdapter(override val manifest: PluginManifest) : EmulatorAdapte
     }
 }
 
-class PluginRegistry(manifests: List<PluginManifest>) {
-    private val adapters: List<EmulatorAdapter> = manifests.mapNotNull {
+class PluginStore(context: Context) {
+    private val prefs = context.getSharedPreferences("plugins", Context.MODE_PRIVATE)
+
+    fun isEnabled(id: String): Boolean = id !in prefs.getStringSet(KEY, emptySet()).orEmpty()
+
+    fun setEnabled(id: String, enabled: Boolean) {
+        val disabled = prefs.getStringSet(KEY, emptySet()).orEmpty().toMutableSet()
+        if (enabled) disabled.remove(id) else disabled.add(id)
+        prefs.edit().putStringSet(KEY, disabled).apply()
+    }
+
+    private companion object {
+        const val KEY = "disabled"
+    }
+}
+
+data class LoadResult(val manifests: List<PluginManifest>, val errors: List<Pair<String, String>>)
+
+object PluginLoader {
+    fun load(dir: File): LoadResult {
+        val files = dir.listFiles { f -> f.extension == "json" }?.sortedBy { it.name }.orEmpty()
+        val manifests = mutableListOf<PluginManifest>()
+        val errors = mutableListOf<Pair<String, String>>()
+        for (f in files) {
+            try {
+                manifests += PluginManifestParser.parse(f.readText())
+            } catch (e: PluginManifestException) {
+                errors += f.name to (e.message ?: "inválido")
+            } catch (e: java.io.IOException) {
+                errors += f.name to "falha de leitura"
+            }
+        }
+        return LoadResult(manifests, errors)
+    }
+}
+
+class PluginRegistry(manifests: List<PluginManifest>, val rejected: List<Pair<String, String>> = emptyList()) {
+    private val all: List<PluginManifest> = manifests.distinctBy { it.id }
+    private val adapters: List<EmulatorAdapter> = all.mapNotNull {
         if (it.type == PluginType.EXTERNAL_APP) ExternalAppAdapter(it) else null
     }
 
-    fun adaptersFor(platformId: String): List<EmulatorAdapter> =
-        adapters.filter { platformId in it.manifest.platforms }
+    fun adaptersFor(platformId: String, store: PluginStore): List<EmulatorAdapter> =
+        adapters.filter { platformId in it.manifest.platforms && store.isEnabled(it.manifest.id) }
 
-    fun diagnostics(context: Context): List<PluginDiagnostic> =
-        adapters.map { PluginDiagnostic(it.manifest, it.diagnose(context)) }
+    fun diagnostics(context: Context, store: PluginStore): List<PluginDiagnostic> = all.map { m ->
+        val enabled = store.isEnabled(m.id)
+        val status = when {
+            !enabled -> PluginStatus.DISABLED
+            m.type == PluginType.NATIVE_CORE ->
+                if (m.abis.none { it in deviceAbis }) PluginStatus.ABI_INCOMPATIBLE
+                else PluginStatus.RUNTIME_UNAVAILABLE
+            else -> adapters.first { it.manifest.id == m.id }.diagnose(context)
+        }
+        PluginDiagnostic(m, status, enabled)
+    }
 
     companion object {
         val deviceAbis: List<String> = Build.SUPPORTED_ABIS.toList()
 
-        fun builtin(): PluginRegistry = PluginRegistry(
-            listOf(
-                external("ppsspp", "PPSSPP", "org.ppsspp.ppsspp", "psp"),
-                external("duckstation", "DuckStation", "com.github.stenzek.duckstation", "ps1"),
-                external("melonds", "melonDS", "me.magnum.melonds", "nds"),
-                external("dolphin", "Dolphin", "org.dolphinemu.dolphinemu", "gamecube", "wii"),
-            )
+        fun load(context: Context): PluginRegistry {
+            val dir = File(context.filesDir, "plugins")
+            val loaded = PluginLoader.load(dir)
+            return PluginRegistry(builtin + loaded.manifests, loaded.errors)
+        }
+
+        private val builtin: List<PluginManifest> = listOf(
+            external("ppsspp", "PPSSPP", "org.ppsspp.ppsspp", "psp"),
+            external("duckstation", "DuckStation", "com.github.stenzek.duckstation", "ps1"),
+            external("melonds", "melonDS", "me.magnum.melonds", "nds"),
+            external("dolphin", "Dolphin", "org.dolphinemu.dolphinemu", "gamecube", "wii"),
         )
 
         private fun external(id: String, name: String, pkg: String, vararg platforms: String) =
