@@ -4,10 +4,10 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <queries>
-        <package android:name="org.ppsspp.ppsspp" />
-        <package android:name="com.github.stenzek.duckstation" />
-        <package android:name="me.magnum.melonds" />
-        <package android:name="org.dolphinemu.dolphinemu" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application

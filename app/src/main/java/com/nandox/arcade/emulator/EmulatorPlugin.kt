@@ -1,7 +1,9 @@
 package com.nandox.arcade.emulator
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.AssetManager
 import android.net.Uri
 import android.os.Build
 import java.io.File
@@ -21,6 +23,8 @@ data class PluginManifest(
     val packageName: String?,
     val abis: List<String>,
     val validated: Boolean,
+    val launchAction: String? = null,
+    val launchClass: String? = null,
 )
 
 object PluginManifestParser {
@@ -59,6 +63,8 @@ object PluginManifestParser {
             packageName = pkg,
             abis = abis,
             validated = o.optBoolean("validated", false),
+            launchAction = o.optString("launchAction").takeIf { it.isNotBlank() },
+            launchClass = o.optString("launchClass").takeIf { it.isNotBlank() },
         )
     }
 }
@@ -67,10 +73,12 @@ enum class PluginStatus { READY, APP_NOT_INSTALLED, ABI_INCOMPATIBLE, RUNTIME_UN
 
 data class PluginDiagnostic(val manifest: PluginManifest, val status: PluginStatus, val enabled: Boolean)
 
+enum class LaunchResult { STARTED_WITH_GAME, OPENED_APP_ONLY, FAILED }
+
 interface EmulatorAdapter {
     val manifest: PluginManifest
     fun diagnose(context: Context): PluginStatus
-    fun launch(context: Context, gameUri: Uri): Boolean
+    fun launch(context: Context, gameUri: Uri): LaunchResult
 }
 
 class ExternalAppAdapter(override val manifest: PluginManifest) : EmulatorAdapter {
@@ -83,14 +91,20 @@ class ExternalAppAdapter(override val manifest: PluginManifest) : EmulatorAdapte
             PluginStatus.APP_NOT_INSTALLED
         }
 
-    override fun launch(context: Context, gameUri: Uri): Boolean {
-        if (diagnose(context) != PluginStatus.READY) return false
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setPackage(pkg)
+    override fun launch(context: Context, gameUri: Uri): LaunchResult {
+        if (diagnose(context) != PluginStatus.READY) return LaunchResult.FAILED
+        val intent = Intent(manifest.launchAction ?: Intent.ACTION_VIEW).apply {
+            if (manifest.launchClass != null) component = ComponentName(pkg, manifest.launchClass) else setPackage(pkg)
             setDataAndType(gameUri, "*/*")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        return runCatching { context.startActivity(intent) }.isSuccess
+        if (runCatching { context.startActivity(intent) }.isSuccess) return LaunchResult.STARTED_WITH_GAME
+        val fallback = context.packageManager.getLaunchIntentForPackage(pkg) ?: return LaunchResult.FAILED
+        return if (runCatching { context.startActivity(fallback) }.isSuccess) {
+            LaunchResult.OPENED_APP_ONLY
+        } else {
+            LaunchResult.FAILED
+        }
     }
 }
 
@@ -115,15 +129,25 @@ data class LoadResult(val manifests: List<PluginManifest>, val errors: List<Pair
 object PluginLoader {
     fun load(dir: File): LoadResult {
         val files = dir.listFiles { f -> f.extension == "json" }?.sortedBy { it.name }.orEmpty()
+        return parseAll(files.map { f -> f.name to { f.readText() } })
+    }
+
+    fun loadAssets(assets: AssetManager, folder: String): LoadResult {
+        val names = runCatching { assets.list(folder) }.getOrNull().orEmpty()
+            .filter { it.endsWith(".json") }.sorted()
+        return parseAll(names.map { n -> n to { assets.open("$folder/$n").bufferedReader().use { it.readText() } } })
+    }
+
+    private fun parseAll(entries: List<Pair<String, () -> String>>): LoadResult {
         val manifests = mutableListOf<PluginManifest>()
         val errors = mutableListOf<Pair<String, String>>()
-        for (f in files) {
+        for ((name, read) in entries) {
             try {
-                manifests += PluginManifestParser.parse(f.readText())
+                manifests += PluginManifestParser.parse(read())
             } catch (e: PluginManifestException) {
-                errors += f.name to (e.message ?: "inválido")
+                errors += name to (e.message ?: "inválido")
             } catch (e: java.io.IOException) {
-                errors += f.name to "falha de leitura"
+                errors += name to "falha de leitura"
             }
         }
         return LoadResult(manifests, errors)
@@ -155,19 +179,9 @@ class PluginRegistry(manifests: List<PluginManifest>, val rejected: List<Pair<St
         val deviceAbis: List<String> = Build.SUPPORTED_ABIS.toList()
 
         fun load(context: Context): PluginRegistry {
-            val dir = File(context.filesDir, "plugins")
-            val loaded = PluginLoader.load(dir)
-            return PluginRegistry(builtin + loaded.manifests, loaded.errors)
+            val bundled = PluginLoader.loadAssets(context.assets, "plugins")
+            val user = PluginLoader.load(File(context.filesDir, "plugins"))
+            return PluginRegistry(bundled.manifests + user.manifests, bundled.errors + user.errors)
         }
-
-        private val builtin: List<PluginManifest> = listOf(
-            external("ppsspp", "PPSSPP", "org.ppsspp.ppsspp", "psp"),
-            external("duckstation", "DuckStation", "com.github.stenzek.duckstation", "ps1"),
-            external("melonds", "melonDS", "me.magnum.melonds", "nds"),
-            external("dolphin", "Dolphin", "org.dolphinemu.dolphinemu", "gamecube", "wii"),
-        )
-
-        private fun external(id: String, name: String, pkg: String, vararg platforms: String) =
-            PluginManifest(id, name, "1", PluginType.EXTERNAL_APP, platforms.toList(), pkg, emptyList(), false)
     }
 }

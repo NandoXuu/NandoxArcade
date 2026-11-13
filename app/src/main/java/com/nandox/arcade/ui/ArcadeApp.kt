@@ -65,6 +65,7 @@ import androidx.navigation.navArgument
 import com.nandox.arcade.BuildConfig
 import com.nandox.arcade.core.Platforms
 import com.nandox.arcade.data.ArcadeDb
+import com.nandox.arcade.emulator.LaunchResult
 import com.nandox.arcade.emulator.PluginRegistry
 import com.nandox.arcade.emulator.PluginStore
 import com.nandox.arcade.emulator.PluginStatus
@@ -244,10 +245,13 @@ private fun LibraryScreen(platformId: String, registry: PluginRegistry, onOpenUn
                             .clickable {
                                 val adapter = registry.adaptersFor(g.platformId, store)
                                     .firstOrNull { it.diagnose(context) == PluginStatus.READY }
-                                val ok = adapter?.launch(context, Uri.parse(g.uri)) == true
-                                if (!ok) {
-                                    Toast.makeText(context, "Nenhum emulador disponível para este jogo", Toast.LENGTH_SHORT).show()
+                                val result = adapter?.launch(context, Uri.parse(g.uri)) ?: LaunchResult.FAILED
+                                val text = when (result) {
+                                    LaunchResult.STARTED_WITH_GAME -> null
+                                    LaunchResult.OPENED_APP_ONLY -> "Emulador aberto sem o jogo. Abra o arquivo por dentro dele."
+                                    LaunchResult.FAILED -> "Nenhum emulador disponível para este jogo"
                                 }
+                                if (text != null) Toast.makeText(context, text, Toast.LENGTH_LONG).show()
                             }
                             .padding(16.dp),
                     )
