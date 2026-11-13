@@ -1,6 +1,16 @@
 package com.nandox.arcade.ui
 
 import android.os.Build
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import com.nandox.arcade.core.PlatformClassifier
+import com.nandox.arcade.data.SourceEntity
+import com.nandox.arcade.scanner.GameScanner
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -76,7 +86,13 @@ fun ArcadeApp() {
             composable(
                 "library/{platform}",
                 arguments = listOf(navArgument("platform") { type = NavType.StringType }),
-            ) { LibraryScreen(it.arguments?.getString("platform").orEmpty()) }
+            ) {
+                LibraryScreen(
+                    platformId = it.arguments?.getString("platform").orEmpty(),
+                    registry = registry,
+                    onOpenUnknown = { nav.navigate("library/${PlatformClassifier.UNKNOWN}") },
+                )
+            }
             composable("plugins") { PluginsScreen(registry) }
             composable("settings") { SettingsScreen() }
         }
@@ -155,19 +171,67 @@ private fun HomeScreen(onOpenLibrary: (String) -> Unit, onPlugins: () -> Unit, o
 }
 
 @Composable
-private fun LibraryScreen(platformId: String) {
+private fun LibraryScreen(platformId: String, registry: PluginRegistry, onOpenUnknown: () -> Unit) {
     val context = LocalContext.current
-    val games by remember { ArcadeDb.get(context).games().observeAll() }
-        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val dao = remember { ArcadeDb.get(context).games() }
+    val store = remember { PluginStore(context) }
+    val scope = rememberCoroutineScope()
+    val games by remember { dao.observeAll() }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val sources by remember { dao.observeSources() }.collectAsStateWithLifecycle(initialValue = emptyList())
+    var scanning by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            scope.launch { dao.insertSource(SourceEntity(uri = uri.toString())) }
+        }
+    }
+
+    fun scanAll() {
+        scope.launch {
+            scanning = true
+            var added = 0
+            for (src in dao.sources()) {
+                val found = GameScanner.scan(context, Uri.parse(src.uri))
+                added += dao.insertGames(found).count { it != -1L }
+            }
+            scanning = false
+            message = "$added jogo(s) novo(s) adicionado(s)"
+        }
+    }
+
     val platform = Platforms.byId(platformId)
     val filtered = games.filter { it.platformId == platformId }
+    val unknownCount = games.count { it.platformId == PlatformClassifier.UNKNOWN }
 
     Column(Modifier.fillMaxSize().padding(24.dp)) {
-        Text(platform?.name ?: "Biblioteca", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(16.dp))
+        Text(platform?.name ?: "Não classificados", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = { picker.launch(null) }) { Text("Adicionar pasta") }
+            Button(onClick = { scanAll() }, enabled = sources.isNotEmpty() && !scanning) {
+                Text(if (scanning) "Escaneando…" else "Escanear")
+            }
+        }
+        Text(
+            "${sources.size} pasta(s) configurada(s)",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 13.sp,
+        )
+        message?.let { Text(it, fontSize = 13.sp) }
+        if (unknownCount > 0 && platform != null) {
+            Text(
+                "$unknownCount jogo(s) sem plataforma definida",
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 13.sp,
+                modifier = Modifier.clickable(onClick = onOpenUnknown),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
         if (filtered.isEmpty()) {
             Text(
-                "Nenhum jogo nesta plataforma. A detecção de jogos chega na próxima fase.",
+                "Nenhum jogo aqui. Adicione uma pasta e escaneie.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
@@ -177,6 +241,14 @@ private fun LibraryScreen(platformId: String) {
                         g.title,
                         Modifier.fillMaxWidth()
                             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
+                            .clickable {
+                                val adapter = registry.adaptersFor(g.platformId, store)
+                                    .firstOrNull { it.diagnose(context) == PluginStatus.READY }
+                                val ok = adapter?.launch(context, Uri.parse(g.uri)) == true
+                                if (!ok) {
+                                    Toast.makeText(context, "Nenhum emulador disponível para este jogo", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                             .padding(16.dp),
                     )
                 }
