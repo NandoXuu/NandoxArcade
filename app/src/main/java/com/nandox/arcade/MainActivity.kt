@@ -7,7 +7,13 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.lifecycleScope
+import com.nandox.arcade.saves.Outcome
+import com.nandox.arcade.saves.SaveService
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.nandox.arcade.controller.AnalogNavigator
 import com.nandox.arcade.controller.ControlsController
 import com.nandox.arcade.controller.ControlsStore
@@ -24,6 +30,17 @@ class MainActivity : ComponentActivity() {
         controls = ControlsController(ControlsStore(this))
         enableEdgeToEdge()
         setContent { ArcadeTheme { ArcadeApp(controls) } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        lifecycleScope.launch {
+            delay(2000)
+            val result = SaveService.autoBackupIfPending(this@MainActivity)
+            if (result?.outcome == Outcome.FAILED) {
+                Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {

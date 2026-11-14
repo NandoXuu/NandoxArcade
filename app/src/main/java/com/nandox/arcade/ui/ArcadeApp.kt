@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.rememberCoroutineScope
 import com.nandox.arcade.controller.ControlsController
 import com.nandox.arcade.core.PlatformClassifier
+import com.nandox.arcade.saves.SaveSettings
 import com.nandox.arcade.scanner.GameScanner
 import com.nandox.arcade.scanner.SourceChecker
 import com.nandox.arcade.scanner.SourceStatus
@@ -85,6 +86,7 @@ fun ArcadeApp(controls: ControlsController) {
                 HomeScreen(
                     onOpenLibrary = { nav.navigate("library/$it") },
                     onCatalog = { nav.navigate("catalog") },
+                    onSaves = { nav.navigate("saves") },
                     onBrowser = { nav.navigate("browser") },
                     onDownloads = { nav.navigate("downloads") },
                     onPlugins = { nav.navigate("plugins") },
@@ -102,6 +104,7 @@ fun ArcadeApp(controls: ControlsController) {
                     onSources = { nav.navigate("sources") },
                 )
             }
+            composable("saves") { SaveManagerScreen(registry) }
             composable("catalog") { CatalogScreen(registry) }
             composable("browser") { BrowserScreen(onExit = { nav.popBackStack() }) }
             composable("downloads") { DownloadsScreen() }
@@ -117,6 +120,7 @@ fun ArcadeApp(controls: ControlsController) {
 private fun HomeScreen(
     onOpenLibrary: (String) -> Unit,
     onCatalog: () -> Unit,
+    onSaves: () -> Unit,
     onBrowser: () -> Unit,
     onDownloads: () -> Unit,
     onPlugins: () -> Unit,
@@ -189,6 +193,7 @@ private fun HomeScreen(
         ) {
             Button(onClick = { onOpenLibrary(platforms[selected].id) }) { Text("Biblioteca") }
             OutlinedButton(onClick = onCatalog) { Text("Catálogo") }
+            OutlinedButton(onClick = onSaves) { Text("Saves") }
             OutlinedButton(onClick = onBrowser) { Text("Navegador") }
             OutlinedButton(onClick = onDownloads) { Text("Downloads") }
             OutlinedButton(onClick = onPlugins) { Text("Plugins") }
@@ -283,6 +288,7 @@ private fun LibraryScreen(
                                 val adapter = registry.adaptersFor(g.platformId, store)
                                     .firstOrNull { it.diagnose(context) == PluginStatus.READY }
                                 val result = adapter?.launch(context, Uri.parse(g.uri)) ?: LaunchResult.FAILED
+                                if (result != LaunchResult.FAILED) SaveSettings(context).pendingSession = true
                                 val text = when (result) {
                                     LaunchResult.STARTED_WITH_GAME -> null
                                     LaunchResult.OPENED_APP_ONLY -> "Emulador aberto sem o jogo. Abra o arquivo por dentro dele."

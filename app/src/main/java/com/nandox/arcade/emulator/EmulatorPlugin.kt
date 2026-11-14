@@ -155,7 +155,7 @@ object PluginLoader {
 }
 
 class PluginRegistry(manifests: List<PluginManifest>, val rejected: List<Pair<String, String>> = emptyList()) {
-    private val all: List<PluginManifest> = manifests.distinctBy { it.id }
+    val all: List<PluginManifest> = manifests.distinctBy { it.id }
     private val adapters: List<EmulatorAdapter> = all.mapNotNull {
         if (it.type == PluginType.EXTERNAL_APP) ExternalAppAdapter(it) else null
     }
