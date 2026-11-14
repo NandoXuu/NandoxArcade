@@ -1,16 +1,17 @@
 package com.nandox.arcade.ui
 
 import android.os.Build
-import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.rememberCoroutineScope
 import com.nandox.arcade.controller.ControlsController
 import com.nandox.arcade.core.PlatformClassifier
-import com.nandox.arcade.data.SourceEntity
 import com.nandox.arcade.scanner.GameScanner
+import com.nandox.arcade.scanner.SourceChecker
+import com.nandox.arcade.scanner.SourceStatus
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -93,8 +94,10 @@ fun ArcadeApp(controls: ControlsController) {
                     platformId = it.arguments?.getString("platform").orEmpty(),
                     registry = registry,
                     onOpenUnknown = { nav.navigate("library/${PlatformClassifier.UNKNOWN}") },
+                    onSources = { nav.navigate("sources") },
                 )
             }
+            composable("sources") { SourcesScreen() }
             composable("plugins") { PluginsScreen(registry) }
             composable("settings") { SettingsScreen(onControls = { nav.navigate("controls") }) }
             composable("controls") { ControlsScreen(controls) }
@@ -174,7 +177,12 @@ private fun HomeScreen(onOpenLibrary: (String) -> Unit, onPlugins: () -> Unit, o
 }
 
 @Composable
-private fun LibraryScreen(platformId: String, registry: PluginRegistry, onOpenUnknown: () -> Unit) {
+private fun LibraryScreen(
+    platformId: String,
+    registry: PluginRegistry,
+    onOpenUnknown: () -> Unit,
+    onSources: () -> Unit,
+) {
     val context = LocalContext.current
     val dao = remember { ArcadeDb.get(context).games() }
     val store = remember { PluginStore(context) }
@@ -184,10 +192,10 @@ private fun LibraryScreen(platformId: String, registry: PluginRegistry, onOpenUn
     var scanning by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            scope.launch { dao.insertSource(SourceEntity(uri = uri.toString())) }
+    var statuses by remember { mutableStateOf<Map<Long, SourceStatus>>(emptyMap()) }
+    LaunchedEffect(sources) {
+        statuses = withContext(Dispatchers.IO) {
+            sources.associate { it.id to SourceChecker.status(context, Uri.parse(it.uri)) }
         }
     }
 
@@ -196,7 +204,7 @@ private fun LibraryScreen(platformId: String, registry: PluginRegistry, onOpenUn
             scanning = true
             var added = 0
             for (src in dao.sources()) {
-                val found = GameScanner.scan(context, Uri.parse(src.uri))
+                val found = GameScanner.scan(context, Uri.parse(src.uri)).map { it.copy(sourceId = src.id) }
                 added += dao.insertGames(found).count { it != -1L }
             }
             scanning = false
@@ -212,7 +220,7 @@ private fun LibraryScreen(platformId: String, registry: PluginRegistry, onOpenUn
         Text(platform?.name ?: "Não classificados", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { picker.launch(null) }) { Text("Adicionar pasta") }
+            OutlinedButton(onClick = onSources) { Text("Pastas") }
             Button(onClick = { scanAll() }, enabled = sources.isNotEmpty() && !scanning) {
                 Text(if (scanning) "Escaneando…" else "Escanear")
             }
@@ -240,11 +248,17 @@ private fun LibraryScreen(platformId: String, registry: PluginRegistry, onOpenUn
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(filtered, key = { it.id }) { g ->
+                    val available = statuses[g.sourceId]?.let { it == SourceStatus.AVAILABLE } ?: true
                     Text(
-                        g.title,
-                        Modifier.fillMaxWidth()
+                        if (available) g.title else "${g.title} · indisponível",
+                        color = if (available) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
                             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
                             .clickable {
+                                if (!available) {
+                                    Toast.makeText(context, "Pasta indisponível. Conecte o armazenamento.", Toast.LENGTH_LONG).show()
+                                    return@clickable
+                                }
                                 val adapter = registry.adaptersFor(g.platformId, store)
                                     .firstOrNull { it.diagnose(context) == PluginStatus.READY }
                                 val result = adapter?.launch(context, Uri.parse(g.uri)) ?: LaunchResult.FAILED

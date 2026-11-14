@@ -21,6 +21,7 @@ data class GameEntity(
     val title: String,
     val platformId: String,
     val uri: String,
+    val sourceId: Long = 0,
 )
 
 @Entity(tableName = "sources", indices = [Index(value = ["uri"], unique = true)])
@@ -45,6 +46,12 @@ interface GameDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSource(source: SourceEntity): Long
+
+    @Query("DELETE FROM games WHERE sourceId = :id")
+    suspend fun deleteGamesBySource(id: Long)
+
+    @Query("DELETE FROM sources WHERE id = :id")
+    suspend fun deleteSource(id: Long)
 }
 
 private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -55,7 +62,13 @@ private val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-@Database(entities = [GameEntity::class, SourceEntity::class], version = 2, exportSchema = true)
+private val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `games` ADD COLUMN `sourceId` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [GameEntity::class, SourceEntity::class], version = 3, exportSchema = true)
 abstract class ArcadeDb : RoomDatabase() {
     abstract fun games(): GameDao
 
@@ -64,7 +77,7 @@ abstract class ArcadeDb : RoomDatabase() {
 
         fun get(context: Context): ArcadeDb = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, ArcadeDb::class.java, "arcade.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build().also { instance = it }
         }
     }
