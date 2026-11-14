@@ -86,7 +86,6 @@ fun BrowserScreen(onExit: () -> Unit, onDownloads: () -> Unit) {
             delay(1000)
         }
     }
-    LaunchedEffect(Unit) { webView.loadUrl(engine.home) }
 
     val webView = remember {
         WebView(context).apply {
@@ -115,6 +114,7 @@ fun BrowserScreen(onExit: () -> Unit, onDownloads: () -> Unit) {
         }
     }
     DisposableEffect(Unit) { onDispose { webView.destroy() } }
+    LaunchedEffect(Unit) { webView.loadUrl(engine.home) }
 
     BackHandler { if (webView.canGoBack()) webView.goBack() else onExit() }
 
