@@ -38,6 +38,9 @@ interface GameDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertGames(games: List<GameEntity>): List<Long>
 
+    @Query("DELETE FROM games WHERE uri = :uri")
+    suspend fun deleteGameByUri(uri: String)
+
     @Query("SELECT * FROM sources ORDER BY id")
     fun observeSources(): Flow<List<SourceEntity>>
 

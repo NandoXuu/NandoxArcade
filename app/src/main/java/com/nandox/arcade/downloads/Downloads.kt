@@ -14,6 +14,7 @@ data class DownloadItem(
     val state: DownloadState,
     val downloadedBytes: Long,
     val totalBytes: Long,
+    val localUri: String? = null,
 ) {
     val percent: Int?
         get() = if (totalBytes > 0) ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100) else null
@@ -42,6 +43,7 @@ class DownloadsRepository(context: Context) {
             val status = it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
             val so = it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
             val total = it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+            val local = it.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI)
             buildList {
                 while (it.moveToNext()) {
                     add(
@@ -57,6 +59,7 @@ class DownloadsRepository(context: Context) {
                             },
                             downloadedBytes = it.getLong(so),
                             totalBytes = it.getLong(total),
+                            localUri = it.getString(local),
                         )
                     )
                 }

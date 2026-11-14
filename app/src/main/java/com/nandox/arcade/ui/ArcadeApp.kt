@@ -1,7 +1,11 @@
 package com.nandox.arcade.ui
 
 import android.os.Build
+import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -70,6 +74,8 @@ import androidx.navigation.navArgument
 import com.nandox.arcade.BuildConfig
 import com.nandox.arcade.core.Platforms
 import com.nandox.arcade.data.ArcadeDb
+import com.nandox.arcade.data.GameEntity
+import com.nandox.arcade.launcher.GameLauncher
 import com.nandox.arcade.emulator.LaunchResult
 import com.nandox.arcade.emulator.PluginRegistry
 import com.nandox.arcade.emulator.PluginStore
@@ -106,8 +112,8 @@ fun ArcadeApp(controls: ControlsController) {
             }
             composable("saves") { SaveManagerScreen(registry) }
             composable("catalog") { CatalogScreen(registry) }
-            composable("browser") { BrowserScreen(onExit = { nav.popBackStack() }) }
-            composable("downloads") { DownloadsScreen() }
+            composable("browser") { BrowserScreen(onExit = { nav.popBackStack() }, onDownloads = { nav.navigate("downloads") }) }
+            composable("downloads") { DownloadsScreen(registry) }
             composable("sources") { SourcesScreen() }
             composable("plugins") { PluginsScreen(registry) }
             composable("settings") { SettingsScreen(onControls = { nav.navigate("controls") }) }
@@ -238,6 +244,33 @@ private fun LibraryScreen(
         }
     }
 
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        scope.launch {
+            var added = 0
+            var skipped = 0
+            for (uri in uris) {
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { if (it.moveToFirst()) it.getString(0) else null }
+                val hint = listOfNotNull(Platforms.byId(platformId)?.name)
+                val target = name?.let { PlatformClassifier.classify(it, hint) }
+                    ?.takeIf { it != PlatformClassifier.UNKNOWN }
+                    ?: Platforms.byId(platformId)?.id
+                if (name == null || target == null) {
+                    skipped++
+                    continue
+                }
+                val ids = dao.insertGames(
+                    listOf(GameEntity(title = name.substringBeforeLast('.'), platformId = target, uri = uri.toString())),
+                )
+                if (ids.firstOrNull() != -1L) added++ else skipped++
+            }
+            message = "$added jogo(s) importado(s)" + if (skipped > 0) ", $skipped ignorado(s)" else ""
+        }
+    }
+
     val platform = Platforms.byId(platformId)
     val filtered = games.filter { it.platformId == platformId }
     val unknownCount = games.count { it.platformId == PlatformClassifier.UNKNOWN }
@@ -245,7 +278,8 @@ private fun LibraryScreen(
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Text(platform?.name ?: "Não classificados", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = { importer.launch(arrayOf("*/*")) }) { Text("Importar jogo") }
             OutlinedButton(onClick = onSources) { Text("Pastas") }
             Button(onClick = { scanAll() }, enabled = sources.isNotEmpty() && !scanning) {
                 Text(if (scanning) "Escaneando…" else "Escanear")
@@ -285,15 +319,7 @@ private fun LibraryScreen(
                                     Toast.makeText(context, "Pasta indisponível. Conecte o armazenamento.", Toast.LENGTH_LONG).show()
                                     return@clickable
                                 }
-                                val adapter = registry.adaptersFor(g.platformId, store)
-                                    .firstOrNull { it.diagnose(context) == PluginStatus.READY }
-                                val result = adapter?.launch(context, Uri.parse(g.uri)) ?: LaunchResult.FAILED
-                                if (result != LaunchResult.FAILED) SaveSettings(context).pendingSession = true
-                                val text = when (result) {
-                                    LaunchResult.STARTED_WITH_GAME -> null
-                                    LaunchResult.OPENED_APP_ONLY -> "Emulador aberto sem o jogo. Abra o arquivo por dentro dele."
-                                    LaunchResult.FAILED -> "Nenhum emulador disponível para este jogo"
-                                }
+                                val text = GameLauncher.message(GameLauncher.launch(context, registry, g))
                                 if (text != null) Toast.makeText(context, text, Toast.LENGTH_LONG).show()
                             }
                             .padding(16.dp),

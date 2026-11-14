@@ -9,7 +9,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,21 +36,57 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.nandox.arcade.browser.BrowserSettings
+import com.nandox.arcade.browser.SearchEngine
 import com.nandox.arcade.browser.UrlResolver
+import com.nandox.arcade.downloads.DownloadState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import com.nandox.arcade.downloads.DownloadsRepository
 
 private data class PendingDownload(val url: String, val name: String, val mime: String?, val agent: String?)
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun BrowserScreen(onExit: () -> Unit) {
+fun BrowserScreen(onExit: () -> Unit, onDownloads: () -> Unit) {
     val context = LocalContext.current
     val repo = remember { DownloadsRepository(context) }
     var urlText by remember { mutableStateOf("") }
     var canBack by remember { mutableStateOf(false) }
     var canForward by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<PendingDownload?>(null) }
+    val settings = remember { BrowserSettings(context) }
+    var engine by remember { mutableStateOf(settings.engine) }
+    var summary by remember { mutableStateOf("Nenhum download") }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val list = withContext(Dispatchers.IO) { runCatching { repo.list() }.getOrDefault(emptyList()) }
+            val active = list.filter {
+                it.state == DownloadState.RUNNING || it.state == DownloadState.PENDING || it.state == DownloadState.PAUSED
+            }
+            val done = list.count { it.state == DownloadState.DONE }
+            val failed = list.count { it.state == DownloadState.FAILED }
+            summary = if (list.isEmpty()) {
+                "Nenhum download"
+            } else {
+                buildString {
+                    append("Downloads: ")
+                    append(
+                        if (active.isEmpty()) "nada em andamento"
+                        else "${active.size} em andamento" + (active.first().percent?.let { " ($it%)" } ?: ""),
+                    )
+                    append(", $done concluído(s)")
+                    if (failed > 0) append(", $failed falhou")
+                }
+            }
+            delay(1000)
+        }
+    }
+    LaunchedEffect(Unit) { webView.loadUrl(engine.home) }
 
     val webView = remember {
         WebView(context).apply {
@@ -80,7 +119,7 @@ fun BrowserScreen(onExit: () -> Unit) {
     BackHandler { if (webView.canGoBack()) webView.goBack() else onExit() }
 
     fun go() {
-        webView.loadUrl(UrlResolver.resolve(urlText))
+        webView.loadUrl(UrlResolver.resolve(urlText, engine))
     }
 
     Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -96,11 +135,17 @@ fun BrowserScreen(onExit: () -> Unit) {
             )
             Button(onClick = { go() }) { Text("Ir") }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { webView.goBack() }, enabled = canBack) { Text("Voltar") }
             OutlinedButton(onClick = { webView.goForward() }, enabled = canForward) { Text("Avançar") }
             OutlinedButton(onClick = { webView.reload() }) { Text("Recarregar") }
+            OutlinedButton(onClick = {
+                engine = if (engine == SearchEngine.GOOGLE) SearchEngine.DUCKDUCKGO else SearchEngine.GOOGLE
+                settings.engine = engine
+            }) { Text("Busca: ${engine.label}") }
+            OutlinedButton(onClick = onDownloads) { Text("Downloads") }
         }
+        Text(summary, fontSize = 13.sp)
         AndroidView(factory = { webView }, modifier = Modifier.weight(1f).fillMaxWidth())
     }
 

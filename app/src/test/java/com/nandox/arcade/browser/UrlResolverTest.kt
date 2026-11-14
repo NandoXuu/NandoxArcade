@@ -34,3 +34,13 @@ class UrlResolverTest {
         assertFalse(UrlResolver.isAllowedNavigation("file:///a"))
     }
 }
+
+class UrlResolverEngineTest {
+    @Test
+    fun googleEngineBuildsGoogleSearch() {
+        assertEquals(
+            "https://www.google.com/search?q=jogos+gba",
+            UrlResolver.resolve("jogos gba", SearchEngine.GOOGLE),
+        )
+    }
+}
