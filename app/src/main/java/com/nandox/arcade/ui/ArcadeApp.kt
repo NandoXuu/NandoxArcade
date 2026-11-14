@@ -3,6 +3,7 @@ package com.nandox.arcade.ui
 import android.os.Build
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.rememberCoroutineScope
 import com.nandox.arcade.controller.ControlsController
 import com.nandox.arcade.core.PlatformClassifier
@@ -17,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,6 +84,8 @@ fun ArcadeApp(controls: ControlsController) {
             composable("home") {
                 HomeScreen(
                     onOpenLibrary = { nav.navigate("library/$it") },
+                    onBrowser = { nav.navigate("browser") },
+                    onDownloads = { nav.navigate("downloads") },
                     onPlugins = { nav.navigate("plugins") },
                     onSettings = { nav.navigate("settings") },
                 )
@@ -97,6 +101,8 @@ fun ArcadeApp(controls: ControlsController) {
                     onSources = { nav.navigate("sources") },
                 )
             }
+            composable("browser") { BrowserScreen(onExit = { nav.popBackStack() }) }
+            composable("downloads") { DownloadsScreen() }
             composable("sources") { SourcesScreen() }
             composable("plugins") { PluginsScreen(registry) }
             composable("settings") { SettingsScreen(onControls = { nav.navigate("controls") }) }
@@ -106,7 +112,13 @@ fun ArcadeApp(controls: ControlsController) {
 }
 
 @Composable
-private fun HomeScreen(onOpenLibrary: (String) -> Unit, onPlugins: () -> Unit, onSettings: () -> Unit) {
+private fun HomeScreen(
+    onOpenLibrary: (String) -> Unit,
+    onBrowser: () -> Unit,
+    onDownloads: () -> Unit,
+    onPlugins: () -> Unit,
+    onSettings: () -> Unit,
+) {
     val platforms = Platforms.all
     var selected by remember { mutableIntStateOf(0) }
     val listState = rememberLazyListState()
@@ -168,8 +180,13 @@ private fun HomeScreen(onOpenLibrary: (String) -> Unit, onPlugins: () -> Unit, o
             )
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Button(onClick = { onOpenLibrary(platforms[selected].id) }) { Text("Biblioteca") }
+            OutlinedButton(onClick = onBrowser) { Text("Navegador") }
+            OutlinedButton(onClick = onDownloads) { Text("Downloads") }
             OutlinedButton(onClick = onPlugins) { Text("Plugins") }
             OutlinedButton(onClick = onSettings) { Text("Configurações") }
         }
