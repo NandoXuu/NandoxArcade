@@ -58,8 +58,8 @@ fun BrowserScreen(onExit: () -> Unit, onDownloads: () -> Unit) {
     var canBack by remember { mutableStateOf(false) }
     var canForward by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<PendingDownload?>(null) }
-    val settings = remember { BrowserSettings(context) }
-    var engine by remember { mutableStateOf(settings.engine) }
+    val browserSettings = remember { BrowserSettings(context) }
+    var engine by remember { mutableStateOf(browserSettings.engine) }
     var summary by remember { mutableStateOf("Nenhum download") }
 
     LaunchedEffect(Unit) {
@@ -141,7 +141,7 @@ fun BrowserScreen(onExit: () -> Unit, onDownloads: () -> Unit) {
             OutlinedButton(onClick = { webView.reload() }) { Text("Recarregar") }
             OutlinedButton(onClick = {
                 engine = if (engine == SearchEngine.GOOGLE) SearchEngine.DUCKDUCKGO else SearchEngine.GOOGLE
-                settings.engine = engine
+                browserSettings.engine = engine
             }) { Text("Busca: ${engine.label}") }
             OutlinedButton(onClick = onDownloads) { Text("Downloads") }
         }
