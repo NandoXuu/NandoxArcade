@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.rememberCoroutineScope
+import com.nandox.arcade.controller.ControlsController
 import com.nandox.arcade.core.PlatformClassifier
 import com.nandox.arcade.data.SourceEntity
 import com.nandox.arcade.scanner.GameScanner
@@ -71,7 +72,7 @@ import com.nandox.arcade.emulator.PluginStore
 import com.nandox.arcade.emulator.PluginStatus
 
 @Composable
-fun ArcadeApp() {
+fun ArcadeApp(controls: ControlsController) {
     val nav = rememberNavController()
     val context = LocalContext.current
     val registry = remember { PluginRegistry.load(context) }
@@ -95,7 +96,8 @@ fun ArcadeApp() {
                 )
             }
             composable("plugins") { PluginsScreen(registry) }
-            composable("settings") { SettingsScreen() }
+            composable("settings") { SettingsScreen(onControls = { nav.navigate("controls") }) }
+            composable("controls") { ControlsScreen(controls) }
         }
     }
 }
@@ -319,11 +321,13 @@ private fun PluginsScreen(registry: PluginRegistry) {
 }
 
 @Composable
-private fun SettingsScreen() {
+private fun SettingsScreen(onControls: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Configurações", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text("Versão do app: ${BuildConfig.VERSION_NAME}")
         Text("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         Text("ABIs: ${PluginRegistry.deviceAbis.joinToString()}")
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = onControls) { Text("Controles") }
     }
 }
