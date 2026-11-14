@@ -62,22 +62,36 @@ private val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+private val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `catalog` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `entryKey` TEXT NOT NULL, `title` TEXT NOT NULL, `platformId` TEXT NOT NULL, `searchText` TEXT NOT NULL, `altTitles` TEXT NOT NULL, `developer` TEXT NOT NULL, `year` INTEGER NOT NULL, `genres` TEXT NOT NULL)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_catalog_entryKey` ON `catalog` (`entryKey`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_catalog_platformId` ON `catalog` (`platformId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_catalog_searchText` ON `catalog` (`searchText`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `catalog_state` (`entryKey` TEXT NOT NULL, `acquired` INTEGER NOT NULL, PRIMARY KEY(`entryKey`))")
+    }
+}
+
 private val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE `games` ADD COLUMN `sourceId` INTEGER NOT NULL DEFAULT 0")
     }
 }
 
-@Database(entities = [GameEntity::class, SourceEntity::class], version = 3, exportSchema = true)
+@Database(
+    entities = [GameEntity::class, SourceEntity::class, CatalogEntryEntity::class, CatalogStateEntity::class],
+    version = 4,     exportSchema = true,
+)
 abstract class ArcadeDb : RoomDatabase() {
     abstract fun games(): GameDao
+    abstract fun catalog(): CatalogDao
 
     companion object {
         @Volatile private var instance: ArcadeDb? = null
 
         fun get(context: Context): ArcadeDb = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, ArcadeDb::class.java, "arcade.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build().also { instance = it }
         }
     }

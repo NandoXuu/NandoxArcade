@@ -84,6 +84,7 @@ fun ArcadeApp(controls: ControlsController) {
             composable("home") {
                 HomeScreen(
                     onOpenLibrary = { nav.navigate("library/$it") },
+                    onCatalog = { nav.navigate("catalog") },
                     onBrowser = { nav.navigate("browser") },
                     onDownloads = { nav.navigate("downloads") },
                     onPlugins = { nav.navigate("plugins") },
@@ -101,6 +102,7 @@ fun ArcadeApp(controls: ControlsController) {
                     onSources = { nav.navigate("sources") },
                 )
             }
+            composable("catalog") { CatalogScreen(registry) }
             composable("browser") { BrowserScreen(onExit = { nav.popBackStack() }) }
             composable("downloads") { DownloadsScreen() }
             composable("sources") { SourcesScreen() }
@@ -114,6 +116,7 @@ fun ArcadeApp(controls: ControlsController) {
 @Composable
 private fun HomeScreen(
     onOpenLibrary: (String) -> Unit,
+    onCatalog: () -> Unit,
     onBrowser: () -> Unit,
     onDownloads: () -> Unit,
     onPlugins: () -> Unit,
@@ -185,6 +188,7 @@ private fun HomeScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Button(onClick = { onOpenLibrary(platforms[selected].id) }) { Text("Biblioteca") }
+            OutlinedButton(onClick = onCatalog) { Text("Catálogo") }
             OutlinedButton(onClick = onBrowser) { Text("Navegador") }
             OutlinedButton(onClick = onDownloads) { Text("Downloads") }
             OutlinedButton(onClick = onPlugins) { Text("Plugins") }
